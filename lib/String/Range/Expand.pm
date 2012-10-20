@@ -10,7 +10,7 @@ use Carp qw(croak carp);
 #######################
 # VERSION
 #######################
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 #######################
 # EXPORT
@@ -29,55 +29,53 @@ sub expand_range {
 
     my @range;
 
+    # Define a valid range
+    my $valid_range = qr{[a-zA-Z0-9\,\-\^]+}x;
+
     # split expression into ranges
     my @bits;
-    if ( $range_expr =~ m{\[[a-zA-Z0-9,\-\^\s]+\]} ) {
+    if ( $range_expr =~ m{\[$valid_range\]}x ) {
 
         # This is a Range
         # Loop thru' multiple instances (e.g. [a-c][f-i])
-        while ( $range_expr =~ m{(\[[a-zA-Z0-9,\-\^\s]+\])}gc ) {
+        while (1) {
 
-            # Collec pieces
-            my $pre   = $`;
-            my $match = $&;
-            my $post  = $';
+            if ( $range_expr =~ m{(\[$valid_range\])}x ) {
+                my $match = $+;
+                my $pre = substr( $range_expr, 0, $-[0] );
+                push @bits, ($pre) if defined $pre;
+                push @bits, $match;
+                substr( $range_expr, 0, $+[0], '' );
+            } ## end if ( $range_expr =~ m{(\[$valid_range\])}x)
+            else {
+                push @bits, $range_expr;
+                $range_expr = '';
+            }
+            last unless $range_expr;
 
-            # Clean them
-            $pre   = _trim($pre)   if defined $pre;
-            $match = _trim($match) if defined $match;
-            $post  = _trim($post)  if defined $post;
-
-            # Save Them
-            push( @bits, $pre )
-                if ( ( defined $pre ) and ( $pre !~ m{\[|\]} ) );
-            push( @bits, $match ) if ( defined $match );
-            push( @bits, $post )
-                if ( ( defined $post ) and ( $post !~ m{\[|\]} ) );
-        } ## end while ( $range_expr =~ m{(\[[a-zA-Z0-9,\-\^\s]+\])}gc)
-    } ## end if ( $range_expr =~ m{\[[a-zA-Z0-9,\-\^\s]+\]})
+        } ## end while (1)
+    } ## end if ( $range_expr =~ m{\[$valid_range\]}x)
     else {
 
         # Expression does not have any ranges to expand
         push @range, $range_expr;
     }
 
-    # Do we need to expand anything?
-    return @range if not @bits;
-
     # Expand
     foreach my $_bit (@bits) {
-        if ( $_bit =~ m{^\[(.+)\]$} ) {
+        if ( $_bit =~ m{^\[(.+)\]$}x ) {
             @range
-                ? ( @range = _combine( \@range, [ _compute($1) ] ) )
-                : ( @range = _compute($1) );
+                ? do { @range = _combine( \@range, [ _compute($1) ] ); }
+                : do { @range = _compute($1); };
         }
         else {
             @range
-                ? ( @range = _combine( \@range, [$_bit] ) )
-                : ( push( @range, $_bit ) );
+                ? do { @range = _combine( \@range, [$_bit] ); }
+                : do { push( @range, $_bit ); };
         }
     } ## end foreach my $_bit (@bits)
 
+    @range = sort { lc($a) cmp lc($b) } @range if @range;
     return @range;
 } ## end sub expand_range
 
@@ -93,22 +91,21 @@ sub _compute {
     my @list;  # Expanded values
 
     # Loop thru' ranges
-    foreach my $_range ( split( /,/, $expr ) ) {
-        $_range = _trim($_range);  # Cleanup
+    foreach my $_range ( split( /,/x, $expr ) ) {
 
         # Type: [aa-az]. Normal Range
-        if ( $_range =~ m{^(\w+)\-(\w+)$} ) { push @list, ( $1 .. $2 ); }
+        if ( $_range =~ m{^(\w+)\-(\w+)$}x ) { push @list, ( $1 .. $2 ); }
 
         # Type: [^ba-be]. Negate range
-        elsif ( $_range =~ m{^\^(\w+)\-(\w+)$} ) {
+        elsif ( $_range =~ m{^\^(\w+)\-(\w+)$}x ) {
             foreach my $_exclude ( $1 .. $2 ) {
-                @list = grep { !/^$_exclude$/ } @list;
+                @list = grep { !/^$_exclude$/x } @list;
             }
         }
 
         # Type: [^zz]. Negate element
-        elsif ( $_range =~ m{^\^(\w+)$} ) {
-            @list = grep { !/^$1$/ } @list;
+        elsif ( $_range =~ m{^\^(\w+)$}x ) {
+            @list = grep { !/^$1$/x } @list;
         }
 
         # Type: [foo]. Individual element
@@ -131,16 +128,6 @@ sub _combine {
 
     return @list;
 } ## end sub _combine
-
-## _trim
-#   "borrowed" from Text::Trim
-sub _trim {
-    my ($_str) = @_;
-    return unless defined $_str;
-    $_str =~ s{\A\s+}{};
-    $_str =~ s{\s+\z}{};
-    return $_str;
-} ## end sub _trim
 
 #######################
 1;
@@ -172,9 +159,9 @@ String::Range::Expand - Expand range-like strings
 
 =head1 DESCRIPTION
 
-This module provides functions to expand a string that contains range-like
-expressions. This is something that is usually useful when working with
-hostnames, but can be used elsewhere too.
+This module provides functions to expand a string that contains
+range-like expressions. This is something that is usually useful when
+working with hostnames, but can be used elsewhere too.
 
 =head1 FUNCTIONS
 
@@ -182,9 +169,9 @@ hostnames, but can be used elsewhere too.
 
     my @list = expand_range('...');
 
-This function accept a single string, evaluates expressions in those strings
-and returns a list with all avaialble permutations. Ranges with limits are
-expanded using the L<Range
+This function accept a single string, evaluates expressions in those
+strings and returns a list with all avaialble permutations. Ranges with
+limits are expanded using the L<Range
 Operator|http://perldoc.perl.org/perlop.html#Range-Operators>.
 
     my @list = expand_range('[aa-ad]'); # This is identical to ('aa' .. 'ad')
@@ -202,9 +189,9 @@ The following formats are recognized and evaluated
 
 =item L<SSH::Batch>
 
-This is an extremely useful distribution if you are working with hostnames.
-C<String::Range::Expand> was inspired by this distribution, and provides only a
-subset of features of C<SSH::Batch>
+This is an extremely useful distribution if you are working with
+hostnames. C<String::Range::Expand> was inspired by this distribution,
+and provides only a subset of features of C<SSH::Batch>
 
 =item L<String::Glob::Permute>
 
@@ -212,9 +199,9 @@ Pretty similar, but does not evaluate alphabetical ranges
 
 =item L<Text::Glob::Expand>
 
-Like C<String::Glob::Permute>, it does not evaluate alphabetical ranges. But it
-does provide some additional functionality like setting upper limits and
-formatting.
+Like C<String::Glob::Permute>, it does not evaluate alphabetical
+ranges. But it does provide some additional functionality like setting
+upper limits and formatting.
 
 =back
 
@@ -235,7 +222,7 @@ Mithun Ayachit C<mithun@cpan.org>
 
 Copyright (c) 2012, Mithun Ayachit. All rights reserved.
 
-This module is free software; you can redistribute it and/or modify it under
-the same terms as Perl itself. See L<perlartistic>.
+This module is free software; you can redistribute it and/or modify it
+under the same terms as Perl itself. See L<perlartistic>.
 
 =cut
